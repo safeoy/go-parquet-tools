@@ -49,6 +49,14 @@ go run . inspect ./sample.parquet
 - `csv`: Python の中央値より 30.95x 高速
 - `inspect`: Python の中央値より 66.83x 高速
 
+| コマンド | Go 中央値 | Python 中央値 | Go 高速化倍率 |
+| --- | ---: | ---: | ---: |
+| `show` 先頭 100 行 | `0.0145s` | `0.7777s` | `53.53x` |
+| `csv` 先頭 10,000 行 | `0.0274s` | `0.8468s` | `30.95x` |
+| `inspect` メタデータ | `0.0114s` | `0.7589s` | `66.83x` |
+
+![Performance comparison chart](./docs/performance-comparison.svg)
+
 ## Output Formats
 
 行指向コマンドでは以下をサポートします。

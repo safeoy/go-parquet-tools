@@ -49,6 +49,14 @@ go run . inspect ./sample.parquet
 - `csv`：中位延迟比 Python 快 30.95x
 - `inspect`：中位延迟比 Python 快 66.83x
 
+| 命令 | Go 中位耗时 | Python 中位耗时 | Go 加速比 |
+| --- | ---: | ---: | ---: |
+| `show` 前 100 行 | `0.0145s` | `0.7777s` | `53.53x` |
+| `csv` 前 10,000 行 | `0.0274s` | `0.8468s` | `30.95x` |
+| `inspect` 文件元数据 | `0.0114s` | `0.7589s` | `66.83x` |
+
+![Performance comparison chart](./docs/performance-comparison.svg)
+
 ## 输出格式
 
 行数据命令支持：

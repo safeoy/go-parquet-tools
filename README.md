@@ -49,6 +49,14 @@ Latest local comparison on a 100,000-row synthetic dataset:
 - `csv`: 30.95x faster than Python median latency
 - `inspect`: 66.83x faster than Python median latency
 
+| Command | Go median | Python median | Go speedup |
+| --- | ---: | ---: | ---: |
+| `show` first 100 rows | `0.0145s` | `0.7777s` | `53.53x` |
+| `csv` first 10,000 rows | `0.0274s` | `0.8468s` | `30.95x` |
+| `inspect` file metadata | `0.0114s` | `0.7589s` | `66.83x` |
+
+![Performance comparison chart](./docs/performance-comparison.svg)
+
 ## Output Formats
 
 Row-oriented commands support:
