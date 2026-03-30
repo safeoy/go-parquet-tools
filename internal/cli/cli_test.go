@@ -26,6 +26,22 @@ func TestShowCommand(t *testing.T) {
 	}
 }
 
+func TestShowCommandWithGlob(t *testing.T) {
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	pattern := strings.Replace(sampleParquetPath, "small.parquet", "small*.parquet", 1)
+
+	code := Run([]string{"show", "--limit", "2", pattern}, stdout, stderr)
+	if code != 0 {
+		t.Fatalf("show exit code = %d, stderr = %s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "kafka_partition") {
+		t.Fatalf("show output missing expected header: %s", out)
+	}
+}
+
 func TestCSVCommand(t *testing.T) {
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
@@ -55,10 +71,10 @@ func TestInspectCommand(t *testing.T) {
 	}
 
 	out := stdout.String()
-	if !strings.Contains(out, "Rows:") {
+	if !strings.Contains(out, "############ file meta data ############") {
 		t.Fatalf("inspect output missing rows: %s", out)
 	}
-	if !strings.Contains(out, "Schema") || !strings.Contains(out, "Leaf Columns") {
+	if !strings.Contains(out, "############ Columns ############") || !strings.Contains(out, "############ Column(") {
 		t.Fatalf("inspect output missing schema sections: %s", out)
 	}
 }

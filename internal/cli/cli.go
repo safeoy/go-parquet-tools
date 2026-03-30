@@ -38,14 +38,14 @@ func runShow(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("show", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	limit := fs.Int("limit", 20, "maximum number of rows to print; use 0 for all rows")
+	limit := fs.Int("limit", 0, "maximum number of rows to print; use 0 for all rows")
 	width := fs.Int("width", 40, "maximum display width for each cell")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() != 1 {
-		fmt.Fprintln(stderr, "show requires exactly one parquet file")
+	if fs.NArg() < 1 {
+		fmt.Fprintln(stderr, "show requires at least one parquet file or pattern")
 		return 2
 	}
 	if *limit < 0 {
@@ -57,7 +57,7 @@ func runShow(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	data, err := parquettool.ReadRows(fs.Arg(0), *limit)
+	data, err := parquettool.ReadRows(fs.Args(), *limit)
 	if err != nil {
 		return printCommandError(stderr, err)
 	}
@@ -85,8 +85,8 @@ func runCSV(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() != 1 {
-		fmt.Fprintln(stderr, "csv requires exactly one parquet file")
+	if fs.NArg() < 1 {
+		fmt.Fprintln(stderr, "csv requires at least one parquet file or pattern")
 		return 2
 	}
 	if *limit < 0 {
@@ -94,7 +94,7 @@ func runCSV(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	if err := parquettool.WriteCSV(stdout, fs.Arg(0), *limit, !*noHeader); err != nil {
+	if err := parquettool.WriteCSV(stdout, fs.Args(), *limit, !*noHeader); err != nil {
 		return printCommandError(stderr, err)
 	}
 	return 0
@@ -107,17 +107,17 @@ func runInspect(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() != 1 {
-		fmt.Fprintln(stderr, "inspect requires exactly one parquet file")
+	if fs.NArg() < 1 {
+		fmt.Fprintln(stderr, "inspect requires at least one parquet file or pattern")
 		return 2
 	}
 
-	inspection, err := parquettool.Inspect(fs.Arg(0))
+	inspections, err := parquettool.Inspect(fs.Args())
 	if err != nil {
 		return printCommandError(stderr, err)
 	}
 
-	if _, err := io.WriteString(stdout, render.FormatInspection(inspection)); err != nil {
+	if _, err := io.WriteString(stdout, render.FormatInspections(inspections)); err != nil {
 		fmt.Fprintf(stderr, "write output: %v\n", err)
 		return 1
 	}
@@ -144,7 +144,7 @@ func printUsage(w io.Writer) {
 go-parquet-tools reads parquet files from the command line.
 
 Usage:
-  go-parquet-tools <command> [flags] <file>
+  go-parquet-tools <command> [flags] <file-or-pattern> ...
 
 Commands:
   show      Print rows as a readable table
@@ -153,8 +153,8 @@ Commands:
 
 Examples:
   go-parquet-tools show sample.parquet
-  go-parquet-tools show --limit 5 --width 24 sample.parquet
-  go-parquet-tools csv sample.parquet > sample.csv
+  go-parquet-tools show --limit 5 --width 24 data/*.parquet
+  go-parquet-tools csv s3://bucket/path/*.parquet > sample.csv
   go-parquet-tools inspect sample.parquet
 `)+"\n")
 }
