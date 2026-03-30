@@ -34,3 +34,7 @@ go.work.sum
 # Local build caches
 .gocache/
 .gomodcache/
+
+# Local benchmark and comparison artifacts
+.venv-perf/
+.tmp/

@@ -35,6 +35,20 @@ go run . schema ./sample.parquet
 go run . inspect ./sample.parquet
 ```
 
+## Performance
+
+このリポジトリには、Go のベンチマークと Python `parquet-tools` とのエンドツーエンド比較の両方が含まれています。
+
+- Go benchmark source: [internal/parquettool/benchmark_test.go](./internal/parquettool/benchmark_test.go)
+- クロス言語の比較レポート: [docs/performance-report.md](./docs/performance-report.md)
+- レポートを再生成: `python3 ./scripts/perf_compare.py`
+
+100,000 行の合成データセットで取得した直近のローカル比較結果:
+
+- `show`: Python の中央値より 53.53x 高速
+- `csv`: Python の中央値より 30.95x 高速
+- `inspect`: Python の中央値より 66.83x 高速
+
 ## Output Formats
 
 行指向コマンドでは以下をサポートします。

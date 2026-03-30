@@ -35,6 +35,20 @@ go run . schema ./sample.parquet
 go run . inspect ./sample.parquet
 ```
 
+## Performance
+
+The repository includes both Go benchmarks and an end-to-end CLI comparison against the Python `parquet-tools` package.
+
+- Go benchmark source: [internal/parquettool/benchmark_test.go](./internal/parquettool/benchmark_test.go)
+- Cross-language report: [docs/performance-report.md](./docs/performance-report.md)
+- Regenerate the comparison report with `python3 ./scripts/perf_compare.py`
+
+Latest local comparison on a 100,000-row synthetic dataset:
+
+- `show`: 53.53x faster than Python median latency
+- `csv`: 30.95x faster than Python median latency
+- `inspect`: 66.83x faster than Python median latency
+
 ## Output Formats
 
 Row-oriented commands support:

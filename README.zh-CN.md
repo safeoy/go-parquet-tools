@@ -35,6 +35,20 @@ go run . schema ./sample.parquet
 go run . inspect ./sample.parquet
 ```
 
+## 性能
+
+仓库里现在同时包含 Go 基准测试，以及和 Python `parquet-tools` 的端到端性能对比。
+
+- Go benchmark 源码：[internal/parquettool/benchmark_test.go](./internal/parquettool/benchmark_test.go)
+- 跨语言性能报告：[docs/performance-report.md](./docs/performance-report.md)
+- 重新生成对比报告：`python3 ./scripts/perf_compare.py`
+
+最近一次本地对比基于 100,000 行合成数据集，结果如下：
+
+- `show`：中位延迟比 Python 快 53.53x
+- `csv`：中位延迟比 Python 快 30.95x
+- `inspect`：中位延迟比 Python 快 66.83x
+
 ## 输出格式
 
 行数据命令支持：
