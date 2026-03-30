@@ -66,6 +66,44 @@ func FormatInspection(in parquettool.Inspection) string {
 	return b.String()
 }
 
+func FormatSchemas(items []parquettool.SchemaView) string {
+	var b strings.Builder
+	for i, item := range items {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		if len(items) > 1 {
+			fmt.Fprintf(&b, "File: %s\n", item.Path)
+		}
+		for _, node := range item.Schema {
+			writeSchemaNode(&b, node, 0)
+		}
+	}
+	return b.String()
+}
+
+func writeSchemaNode(b *strings.Builder, node parquettool.SchemaNode, depth int) {
+	indent := strings.Repeat("  ", depth)
+	label := node.Name
+	parts := make([]string, 0, 3)
+	if node.Repetition != "" {
+		parts = append(parts, strings.ToLower(node.Repetition))
+	}
+	if node.Physical != "" {
+		parts = append(parts, strings.ToLower(node.Physical))
+	}
+	if node.Logical != "" && node.Logical != "None" {
+		parts = append(parts, strings.ToLower(node.Logical))
+	}
+	if len(parts) > 0 {
+		label += " [" + strings.Join(parts, ", ") + "]"
+	}
+	fmt.Fprintf(b, "%s- %s\n", indent, label)
+	for _, child := range node.Children {
+		writeSchemaNode(b, child, depth+1)
+	}
+}
+
 func rowGroupRows(groups []parquettool.RowGroup) [][]string {
 	rows := make([][]string, 0, len(groups))
 	for _, group := range groups {

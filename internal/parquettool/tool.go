@@ -80,6 +80,23 @@ type KeyValue struct {
 	Value string
 }
 
+type ReadOptions struct {
+	Limit   int
+	Columns []string
+	Filters []RowFilter
+}
+
+type SchemaView struct {
+	Path   string
+	Schema []SchemaNode
+}
+
+type RowFilter struct {
+	Column string
+	Op     string
+	Value  string
+}
+
 type sourceRef struct {
 	Display string
 	Open    func() (*openedSource, error)
@@ -94,7 +111,7 @@ type openedSource struct {
 
 type rowRecord map[string]string
 
-func ReadRows(patterns []string, limit int) (*RowData, error) {
+func ReadRows(patterns []string, opts ReadOptions) (*RowData, error) {
 	refs, err := resolveInputs(patterns)
 	if err != nil {
 		return nil, err
@@ -116,15 +133,15 @@ func ReadRows(patterns []string, limit int) (*RowData, error) {
 		totalRows += fileRows
 
 		remaining := int(fileRows)
-		if limit > 0 {
-			left := limit - len(records)
+		if opts.Limit > 0 {
+			left := opts.Limit - len(records)
 			if left <= 0 {
 				truncated = true
 				reader.Close()
 				_ = src.Close()
 				break
 			}
-			if remaining > left {
+			if len(opts.Filters) == 0 && remaining > left {
 				remaining = left
 				truncated = true
 			}
@@ -135,7 +152,13 @@ func ReadRows(patterns []string, limit int) (*RowData, error) {
 
 		readErr := readRowsInBatches(reader, remaining, func(row any) {
 			record := stringifyTopLevelRow(row, fileColumns)
-			records = append(records, record)
+			if matchesFilters(record, opts.Filters, fileColumns) {
+				if opts.Limit > 0 && len(records) >= opts.Limit {
+					truncated = true
+					return
+				}
+				records = append(records, record)
+			}
 		})
 		reader.Close()
 		closeErr := src.Close()
@@ -147,21 +170,137 @@ func ReadRows(patterns []string, limit int) (*RowData, error) {
 		}
 	}
 
+	selectedColumns, err := selectColumns(columns, opts.Columns)
+	if err != nil {
+		return nil, err
+	}
 	renderedRows := make([][]string, 0, len(records))
 	for _, record := range records {
-		renderedRows = append(renderedRows, renderRecord(record, columns))
+		renderedRows = append(renderedRows, renderRecord(record, selectedColumns))
 	}
 
 	return &RowData{
-		Columns:   columns,
+		Columns:   selectedColumns,
 		Rows:      renderedRows,
 		TotalRows: totalRows,
 		Truncated: truncated,
 	}, nil
 }
 
+func ReadTailRows(patterns []string, limit int) (*RowData, error) {
+	return ReadTailRowsWithOptions(patterns, ReadOptions{Limit: limit})
+}
+
+func ReadTailRowsWithOptions(patterns []string, opts ReadOptions) (*RowData, error) {
+	if len(opts.Filters) > 0 {
+		all, err := ReadRows(patterns, ReadOptions{Columns: opts.Columns, Filters: opts.Filters})
+		if err != nil {
+			return nil, err
+		}
+		if opts.Limit <= 0 || len(all.Rows) <= opts.Limit {
+			return all, nil
+		}
+		return &RowData{
+			Columns:   all.Columns,
+			Rows:      all.Rows[len(all.Rows)-opts.Limit:],
+			TotalRows: all.TotalRows,
+			Truncated: true,
+		}, nil
+	}
+
+	refs, err := resolveInputs(patterns)
+	if err != nil {
+		return nil, err
+	}
+
+	var totalRows int64
+	allColumns := make([]string, 0)
+	chunks := make([][]rowRecord, 0)
+	remaining := opts.Limit
+
+	for _, ref := range refs {
+		src, err := ref.Open()
+		if err != nil {
+			return nil, err
+		}
+		totalRows += src.Reader.NumRows()
+		if err := src.Close(); err != nil {
+			return nil, err
+		}
+	}
+
+	for i := len(refs) - 1; i >= 0; i-- {
+		ref := refs[i]
+		src, err := ref.Open()
+		if err != nil {
+			return nil, err
+		}
+
+		reader := parquet.NewGenericReader[any](src.Reader)
+		fileRows := int(reader.NumRows())
+		take := fileRows
+		if remaining > 0 && take > remaining {
+			take = remaining
+		}
+		start := fileRows - take
+		if start < 0 {
+			start = 0
+		}
+		if err := reader.SeekToRow(int64(start)); err != nil {
+			reader.Close()
+			_ = src.Close()
+			return nil, fmt.Errorf("seek rows from %s: %w", ref.Display, err)
+		}
+
+		fileColumns := topLevelColumns(src.Reader.Root())
+		appendMissingColumns(&allColumns, fileColumns)
+		rows := make([]rowRecord, 0, take)
+		readErr := readRowsInBatches(reader, take, func(row any) {
+			rows = append(rows, stringifyTopLevelRow(row, fileColumns))
+		})
+		reader.Close()
+		closeErr := src.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("read tail rows from %s: %w", ref.Display, readErr)
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+		chunks = append(chunks, rows)
+		if remaining > 0 {
+			remaining -= len(rows)
+			if remaining <= 0 {
+				break
+			}
+		}
+	}
+
+	selectedColumns, err := selectColumns(allColumns, opts.Columns)
+	if err != nil {
+		return nil, err
+	}
+
+	renderedRows := make([][]string, 0)
+	for i := len(chunks) - 1; i >= 0; i-- {
+		for _, row := range chunks[i] {
+			renderedRows = append(renderedRows, renderRecord(row, selectedColumns))
+		}
+	}
+
+	return &RowData{
+		Columns:   selectedColumns,
+		Rows:      renderedRows,
+		TotalRows: totalRows,
+		Truncated: opts.Limit > 0 && int(totalRows) > opts.Limit,
+	}, nil
+}
+
 func WriteCSV(w io.Writer, patterns []string, limit int, includeHeader bool) error {
-	data, err := ReadRows(patterns, limit)
+	return WriteCSVWithOptions(w, patterns, ReadOptions{Limit: limit}, includeHeader)
+}
+
+func WriteCSVWithOptions(w io.Writer, patterns []string, opts ReadOptions, includeHeader bool) error {
+	data, err := ReadRows(patterns, opts)
 	if err != nil {
 		return err
 	}
@@ -182,6 +321,81 @@ func WriteCSV(w io.Writer, patterns []string, limit int, includeHeader bool) err
 		return fmt.Errorf("flush csv: %w", err)
 	}
 	return nil
+}
+
+func CountRows(patterns []string, filters []RowFilter) (int64, error) {
+	if len(filters) > 0 {
+		data, err := ReadRows(patterns, ReadOptions{Filters: filters})
+		if err != nil {
+			return 0, err
+		}
+		return int64(len(data.Rows)), nil
+	}
+	refs, err := resolveInputs(patterns)
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	for _, ref := range refs {
+		src, err := ref.Open()
+		if err != nil {
+			return 0, err
+		}
+		total += src.Reader.NumRows()
+		if err := src.Close(); err != nil {
+			return 0, err
+		}
+	}
+	return total, nil
+}
+
+func LoadSchemas(patterns []string) ([]SchemaView, error) {
+	refs, err := resolveInputs(patterns)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SchemaView, 0, len(refs))
+	for _, ref := range refs {
+		src, err := ref.Open()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, SchemaView{
+			Path:   ref.Display,
+			Schema: buildSchemaTree(src.Reader.Root()),
+		})
+		if err := src.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func ParseFilters(exprs []string) ([]RowFilter, error) {
+	filters := make([]RowFilter, 0, len(exprs))
+	for _, expr := range exprs {
+		filter, err := parseFilter(expr)
+		if err != nil {
+			return nil, err
+		}
+		filters = append(filters, filter)
+	}
+	return filters, nil
+}
+
+func parseFilter(expr string) (RowFilter, error) {
+	ops := []string{"!=", "~=", "^=", "$=", "="}
+	for _, op := range ops {
+		if idx := strings.Index(expr, op); idx > 0 {
+			column := strings.TrimSpace(expr[:idx])
+			value := expr[idx+len(op):]
+			if column == "" {
+				return RowFilter{}, &UsageError{Message: fmt.Sprintf("invalid filter %q", expr)}
+			}
+			return RowFilter{Column: column, Op: op, Value: value}, nil
+		}
+	}
+	return RowFilter{}, &UsageError{Message: fmt.Sprintf("invalid filter %q", expr)}
 }
 
 func Inspect(patterns []string) ([]Inspection, error) {
@@ -476,6 +690,20 @@ func appendMissingColumns(dst *[]string, columns []string) {
 	}
 }
 
+func selectColumns(columns []string, requested []string) ([]string, error) {
+	if len(requested) == 0 {
+		return columns, nil
+	}
+	selected := make([]string, 0, len(requested))
+	for _, column := range requested {
+		if !slices.Contains(columns, column) {
+			return nil, &UsageError{Message: fmt.Sprintf("unknown column %q", column)}
+		}
+		selected = append(selected, column)
+	}
+	return selected, nil
+}
+
 func stringifyTopLevelRow(row any, columns []string) rowRecord {
 	record := make(rowRecord, len(columns))
 	rowMap, ok := row.(map[string]any)
@@ -498,6 +726,43 @@ func renderRecord(record rowRecord, columns []string) []string {
 		values[i] = record[column]
 	}
 	return values
+}
+
+func matchesFilters(record rowRecord, filters []RowFilter, columns []string) bool {
+	if len(filters) == 0 {
+		return true
+	}
+	for _, filter := range filters {
+		if !slices.Contains(columns, filter.Column) {
+			return false
+		}
+		value := record[filter.Column]
+		switch filter.Op {
+		case "=":
+			if value != filter.Value {
+				return false
+			}
+		case "!=":
+			if value == filter.Value {
+				return false
+			}
+		case "~=":
+			if !strings.Contains(value, filter.Value) {
+				return false
+			}
+		case "^=":
+			if !strings.HasPrefix(value, filter.Value) {
+				return false
+			}
+		case "$=":
+			if !strings.HasSuffix(value, filter.Value) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func stringifyValue(v any) string {
